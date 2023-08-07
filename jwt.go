@@ -135,7 +135,7 @@ type JWTAuth struct {
 
 	logger        *zap.Logger
 	parsedSignKey interface{} // can be []byte, *rsa.PublicKey, *ecdsa.PublicKey, etc.
-	jwkCachedSet  jwk.Set
+	jwkCache      *jwk.Cache
 }
 
 // CaddyModule implements caddy.Module interface.
@@ -163,10 +163,20 @@ func (ja *JWTAuth) usingJWK() bool {
 }
 
 func (ja *JWTAuth) setupJWKLoader() {
-	cache := jwk.NewCache(context.Background(), jwk.WithErrSink(ja))
-	cache.Register(ja.JWKURL)
-	ja.jwkCachedSet = jwk.NewCachedSet(cache, ja.JWKURL)
-	ja.logger.Info("using JWKs from URL", zap.String("url", ja.JWKURL), zap.Int("loaded_keys", ja.jwkCachedSet.Len()))
+	ja.jwkCache = jwk.NewCache(context.Background(), jwk.WithErrSink(ja))
+
+	// TODO: jwk.WithMinRefreshInterval OR jwk.WithRefreshInterval
+	ja.jwkCache.Register(ja.JWKURL)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+	defer cancel()
+	if _, err := ja.jwkCache.Refresh(ctx, ja.JWKURL); err != nil {
+		// url is not a valid JWKS
+		panic(err)
+	}
+	// TODO: why are we using a CachedSet rather than a Cache here? With Cache we can explicitly call Refresh
+	// ja.jwkCachedSet = jwk.NewCachedSet(cache, ja.JWKURL)
+	set, _ := ja.jwkCache.Get(context.Background(), ja.JWKURL)
+	ja.logger.Info("using JWKs from URL", zap.String("url", ja.JWKURL), zap.Int("loaded_keys", set.Len()))
 }
 
 // Validate implements caddy.Validator interface.
@@ -211,12 +221,22 @@ func (ja *JWTAuth) keyProvider() jws.KeyProviderFunc {
 	return func(_ context.Context, sink jws.KeySink, sig *jws.Signature, _ *jws.Message) error {
 		if ja.usingJWK() {
 			kid := sig.ProtectedHeaders().KeyID()
-			key, found := ja.jwkCachedSet.LookupKeyID(kid)
+
+			set, _ := ja.jwkCache.Get(context.Background(), ja.JWKURL)
+			key, found := set.LookupKeyID(kid)
 			if !found {
 				if kid == "" {
 					return fmt.Errorf("missing kid in JWT header")
 				}
-				return fmt.Errorf("key specified by kid %q not found in JWKs", kid)
+				// TODO: refresh the cache if the kid isn't found and try again
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+				defer cancel()
+
+				_, _ = ja.jwkCache.Refresh(ctx, ja.JWKURL)
+				key, found = set.LookupKeyID(kid)
+				if !found {
+					return fmt.Errorf("key specified by kid %q not found in JWKs", kid)
+				}
 			}
 			sink.Key(ja.determineSigningAlgorithm(key.Algorithm()), key)
 		} else {
