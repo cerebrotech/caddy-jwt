@@ -1,6 +1,7 @@
 package caddyjwt
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
@@ -637,7 +638,8 @@ func TestJWK(t *testing.T) {
 	time.Sleep(3 * time.Second)
 	ja := &JWTAuth{JWKURL: TestJWKURL, logger: testLogger}
 	assert.Nil(t, ja.Validate())
-	assert.Equal(t, 1, ja.jwkCachedSet.Len())
+	set, _ := ja.jwkCache.Get(context.Background(), ja.JWKURL)
+	assert.Equal(t, 1, set.Len())
 
 	token := issueTokenStringJWK(MapClaims{"sub": "ggicci"})
 	rw := httptest.NewRecorder()
@@ -653,7 +655,8 @@ func TestJWKSet(t *testing.T) {
 	time.Sleep(3 * time.Second)
 	ja := &JWTAuth{JWKURL: TestJWKSetURL, logger: testLogger}
 	assert.Nil(t, ja.Validate())
-	assert.Equal(t, 2, ja.jwkCachedSet.Len())
+	set, _ := ja.jwkCache.Get(context.Background(), ja.JWKURL)
+	assert.Equal(t, 2, set.Len())
 
 	token := issueTokenStringJWK(MapClaims{"sub": "ggicci"})
 	rw := httptest.NewRecorder()
@@ -669,7 +672,8 @@ func TestJWKSet_KeyNotFound(t *testing.T) {
 	time.Sleep(3 * time.Second)
 	ja := &JWTAuth{JWKURL: TestJWKSetURLInapplicable, logger: testLogger}
 	assert.Nil(t, ja.Validate())
-	assert.Equal(t, 2, ja.jwkCachedSet.Len())
+	set, _ := ja.jwkCache.Get(context.Background(), ja.JWKURL)
+	assert.Equal(t, 2, set.Len())
 
 	token := issueTokenStringJWK(MapClaims{"sub": "ggicci"})
 	rw := httptest.NewRecorder()
