@@ -5,7 +5,7 @@ info:
   x-cortex-tag: caddy-jwt
   x-cortex-type: service
   x-cortex-owners:
-  - name: ggicci
+  - name: eng-train
     type: group
     provider: OKTA
     description: Updated by eng-devprod
